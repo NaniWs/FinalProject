@@ -1,7 +1,8 @@
 package com.example.app;
 
+import org.flywaydb.core.Flyway;
+
 import java.io.BufferedReader;
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.sql.*;
@@ -9,104 +10,111 @@ import java.util.Properties;
 
 public class App {
 
-    private static String DB_URL;
-    private static String DB_USER;
-    private static String DB_PASSWORD;
-
     public static void main(String[] args) {
-        loadProperties();
+        try {
+            Properties props = loadProperties();
 
-        try (Connection connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD)) {
-            System.out.println("Connected to DB!");
+            String url = props.getProperty("db.url");
+            String user = props.getProperty("db.user");
+            String password = props.getProperty("db.password");
 
-            // Запускаем скрипт из ресурсов
-            runSqlScriptFromResource(connection, "test-queries.sql");
+            // Запуск миграций Flyway
+            System.out.println("Starting DB migrations...");
+            runMigrations(url, user, password);
+            System.out.println("Migrations finished.");
 
-        } catch (SQLException e) {
+            // Выполнение скрипта test-queries.sql
+            System.out.println("Executing SQL script...");
+            try (Connection conn = DriverManager.getConnection(url, user, password)) {
+                runSqlScriptFromResource(conn, "/test-queries.sql");
+            }
+
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    // Загружаем параметры из application.properties
-    private static void loadProperties() {
+    private static Properties loadProperties() throws Exception {
         Properties props = new Properties();
         try (InputStream input = App.class.getClassLoader().getResourceAsStream("application.properties")) {
             if (input == null) {
-                System.err.println("Unable to find application.properties");
-                System.exit(1);
+                throw new RuntimeException("Unable to find application.properties");
             }
             props.load(input);
-            DB_URL = props.getProperty("db.url");
-            DB_USER = props.getProperty("db.user");
-            DB_PASSWORD = props.getProperty("db.password");
-        } catch (IOException ex) {
-            ex.printStackTrace();
-            System.exit(1);
         }
+        return props;
     }
 
-    // Читаем SQL скрипт из файла ресурсов и выполняем запросы по отдельности
-    private static void runSqlScriptFromResource(Connection conn, String resourceFileName) {
-        try (InputStream input = App.class.getClassLoader().getResourceAsStream(resourceFileName)) {
-            if (input == null) {
-                System.err.println("Unable to find " + resourceFileName);
-                return;
-            }
-            BufferedReader reader = new BufferedReader(new InputStreamReader(input));
+
+    private static void runMigrations(String url, String user, String password) {
+        Flyway flyway = Flyway.configure()
+                .dataSource(url, user, password)
+                .baselineOnMigrate(true)
+                .load();
+        flyway.migrate();
+    }
+
+    private static void runSqlScriptFromResource(Connection conn, String resourcePath) throws Exception {
+        InputStream inputStream = App.class.getResourceAsStream(resourcePath);
+        if (inputStream == null) {
+            throw new RuntimeException("SQL script not found: " + resourcePath);
+        }
+
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
             StringBuilder sqlBuilder = new StringBuilder();
             String line;
             while ((line = reader.readLine()) != null) {
-                // Игнорируем комментарии
-                if (line.trim().startsWith("--") || line.trim().isEmpty()) {
+                line = line.trim();
+                // Пропускаем комментарии и пустые строки
+                if (line.isEmpty() || line.startsWith("--") || line.startsWith("//")) {
                     continue;
                 }
                 sqlBuilder.append(line).append(" ");
-                // Если строка заканчивается на ; — считаем запрос готовым к выполнению
-                if (line.trim().endsWith(";")) {
-                    String sql = sqlBuilder.toString().trim();
-                    // Убираем последний символ ;
-                    sql = sql.substring(0, sql.length() - 1).trim();
-
-                    System.out.println("\n=== SQL Query ===");
-                    System.out.println(sql);
-                    System.out.println("=== Result ===");
-                    executeAndPrintQuery(conn, sql);
-
-                    sqlBuilder.setLength(0); // очищаем буфер
+                // Если команда заканчивается точкой с запятой, исполняем
+                if (line.endsWith(";")) {
+                    String sql = sqlBuilder.toString();
+                    executeAndPrint(conn, sql);
+                    sqlBuilder.setLength(0); // очистить builder
                 }
             }
-        } catch (IOException e) {
-            e.printStackTrace();
+            // Если что-то осталось без точки с запятой
+            if (sqlBuilder.length() > 0) {
+                executeAndPrint(conn, sqlBuilder.toString());
+            }
         }
     }
 
-    // Выполняем запрос и выводим результат (только SELECT, для остальных — сообщение)
-    private static void executeAndPrintQuery(Connection conn, String sql) {
-        try {
-            Statement stmt = conn.createStatement();
+    private static void executeAndPrint(Connection conn, String sql) {
+        System.out.println("\n--- Executing SQL ---");
+        System.out.println(sql);
+
+        sql = sql.trim();
+        // Удаляем последний символ ";" если есть
+        if (sql.endsWith(";")) {
+            sql = sql.substring(0, sql.length() - 1);
+        }
+
+        try (Statement stmt = conn.createStatement()) {
             boolean hasResultSet = stmt.execute(sql);
 
             if (hasResultSet) {
-                ResultSet rs = stmt.getResultSet();
-                printResultSet(rs);
-                rs.close();
+                try (ResultSet rs = stmt.getResultSet()) {
+                    printResultSet(rs);
+                }
             } else {
                 int updateCount = stmt.getUpdateCount();
-                System.out.println("Query executed successfully, affected rows: " + updateCount);
+                System.out.println("Update count: " + updateCount);
             }
-
-            stmt.close();
         } catch (SQLException e) {
-            System.err.println("Error executing query: " + e.getMessage());
+            System.err.println("Error executing SQL: " + e.getMessage());
         }
     }
 
-    // Выводим содержимое ResultSet в табличном виде
     private static void printResultSet(ResultSet rs) throws SQLException {
         ResultSetMetaData meta = rs.getMetaData();
         int columnCount = meta.getColumnCount();
 
-        // Заголовок
+        // Заголовки колонок
         for (int i = 1; i <= columnCount; i++) {
             System.out.print(meta.getColumnName(i) + "\t");
         }

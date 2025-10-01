@@ -12,6 +12,7 @@
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
     <dependencies>
@@ -21,5 +22,32 @@
             <artifactId>postgresql</artifactId>
             <version>42.7.1</version>
         </dependency>
+
+        <!-- Flyway for DB migrations -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+            <version>9.22.0</version>
+        </dependency>
+
+        <!-- Optional: Apache Commons Configuration for properties loading (если нужен) -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-configuration2</artifactId>
+            <version>2.9.0</version>
+        </dependency>
+
+        <!-- Optional: SLF4J API and simple logger для Flyway логов -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>2.0.7</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>2.0.7</version>
+        </dependency>
     </dependencies>
+
 </project>
